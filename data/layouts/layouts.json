@@ -2364,7 +2364,7 @@
         {
             "id": "LAYOUT_INSIDE_OF_TRUCK",
             "name": "InsideOfTruck_Layout",
-            "width": 6,
+            "width": 5,
             "height": 5,
             "primary_tileset": "gTileset_General",
             "secondary_tileset": "gTileset_InsideOfTruck",
@@ -4410,6 +4410,16 @@
             "secondary_tileset": "gTileset_MysteryEventsHouse",
             "border_filepath": "data/layouts/SootopolisCity_MysteryEventsHouse_1F_StairsUnblocked/border.bin",
             "blockdata_filepath": "data/layouts/SootopolisCity_MysteryEventsHouse_1F_StairsUnblocked/map.bin"
+        },
+        {
+            "id": "LAYOUT_DADS_FARM",
+            "name": "DadsFarm_Layout",
+            "width": 66,
+            "height": 58,
+            "primary_tileset": "gTileset_General",
+            "secondary_tileset": "gTileset_Petalburg",
+            "border_filepath": "data/layouts/DadsFarm/border.bin",
+            "blockdata_filepath": "data/layouts/DadsFarm/map.bin"
         }
     ]
 }
