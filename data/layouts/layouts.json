@@ -4414,8 +4414,8 @@
         {
             "id": "LAYOUT_DADS_FARM",
             "name": "DadsFarm_Layout",
-            "width": 66,
-            "height": 58,
+            "width": 10,
+            "height": 20,
             "primary_tileset": "gTileset_General",
             "secondary_tileset": "gTileset_Petalburg",
             "border_filepath": "data/layouts/DadsFarm/border.bin",
