@@ -93,6 +93,25 @@ def get_row_color_pair(behavior_name):
             return color_idx
     return 7
 
+def get_tile_representation(tile_id, behavior_name):
+    """Translates a behavior type into a distinct readable visual block design."""
+    name_lower = behavior_name.lower()
+    if tile_id == 0:
+        return "░░░░" # Background void / transparency block
+    elif "water" in name_lower:
+        return "~~~~"
+    elif "grass" in name_lower:
+        return "wwww"
+    elif "door" in name_lower or "warp" in name_lower:
+        return "[⌂]"
+    elif "jump" in name_lower:
+        return ">>>>"
+    elif "block" in name_lower:
+        return "████"
+    
+    # Fallback to absolute ID if no macro texture behavior triggers
+    return f"{tile_id:04d}"
+
 def update_browser_filtering(all_tiles, browser):
     filtered = []
     s_term = browser.search.strip().lower()
@@ -157,15 +176,18 @@ def resize_map_matrix(old_width, old_height, new_width, new_height, old_metatile
 
 def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blocks):
     curses.use_default_colors()
-    curses.curs_set(1)
+    curses.curs_set(0) # Hide standard hardware cursor for better grid gamefeel
     stdscr.keypad(True)
     
+    # Initialize color blocks: Text colored, Background color matching for dense structural fill
     for i in range(0, 16):
+        bg_color = curses.COLOR_BLUE if i == 4 else (curses.COLOR_GREEN if i == 2 else curses.COLOR_BLACK)
         text_color = curses.COLOR_WHITE if i == 0 else i
-        curses.init_pair(i + 1, text_color, -1)
+        # Use full structural background pairing to turn simple strings into blocks
+        curses.init_pair(i + 1, text_color, bg_color)
         
-    curses.init_pair(100, curses.COLOR_WHITE, curses.COLOR_BLUE)
-    curses.init_pair(101, curses.COLOR_BLACK, curses.COLOR_CYAN) # Selection highlight
+    curses.init_pair(100, curses.COLOR_YELLOW, curses.COLOR_WHITE) # Active Cursor Highlight
+    curses.init_pair(101, curses.COLOR_BLACK, curses.COLOR_CYAN)   # Multi-Tile Selection Boundary
 
     all_browser_tiles = load_metatiles_csv(allowed_tilesets)
     browser = Browser()
@@ -190,9 +212,10 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
             stdscr.erase()
             term_lines, term_cols = stdscr.getmaxyx()
 
-            map_split_weight = 0.65 if browser.visible else 0.85
+            # Dynamic structural alignment windows
+            map_split_weight = 0.60
             map_cols = int(term_cols * map_split_weight)
-            side_panel_cols = term_cols - map_cols - 2
+            side_panel_cols = term_cols - map_cols - 4
 
             active_tiles = border_blocks if border_mode else metatiles
             active_width = 2 if border_mode else current_width
@@ -201,6 +224,7 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
 
             c_x, c_y = active_cursor % active_width, active_cursor // active_width
 
+            # Each visual layout tile is 6 horizontal columns wide
             max_visible_cols = max(1, (map_cols - 4) // 6)
             max_visible_rows = max(1, term_lines - 12)
 
@@ -210,20 +234,20 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
             elif c_y >= scroll_y + max_visible_rows: scroll_y = c_y - max_visible_rows + 1
 
             if term_lines > 0:
-                title_prefix = f"[SELECTING] " if selection.active else ("[BORDER MODE] " if border_mode else "")
-                stdscr.addstr(0, 0, f"=== {title_prefix}POKEEMERALD TERMINAL MAP EDITOR (Poorymap) ===", curses.color_pair(3))
+                title_prefix = f"[SELECTING] " if selection.active else ("[BORDER] " if border_mode else "")
+                stdscr.addstr(0, 0, f"=== {title_prefix}PORYMAP TERMINAL MAP ENGINE LAYOUT ===", curses.color_pair(3))
             if term_lines > 1:
-                stdscr.addstr(1, 0, "Arrows: Move | J/K: Elev | F: Flip | S: Select Block | C/V: Copy/Paste Area | -: Sequential Fill | R: Resize")
+                stdscr.addstr(1, 0, "Arrows: Move | J/K: Elev | F: Flip | S: Range | C/V: Copy-Paste | R: Resize | N: Browser", curses.A_BOLD)
 
             if scroll_y > 0 and term_lines > 2:
-                stdscr.addstr(2, 0, "     ^^^ (More rows above) ^^^")
+                stdscr.addstr(2, 0, "     ^^^ (More layout geometry above) ^^^")
 
             active_elevations = sorted(list({parse_metatile(t)[1] for t in active_tiles}))
 
-            # Establish math boundaries for 2D visual checking loops
             x_min, x_max = (min(selection.start_x, c_x), max(selection.start_x, c_x)) if selection.active else (c_x, c_x)
             y_min, y_max = (min(selection.start_y, c_y), max(selection.start_y, c_y)) if selection.active else (c_y, c_y)
 
+            # --- RENDERING ENGINE LOOP ---
             for y in range(scroll_y, min(active_height, scroll_y + max_visible_rows)):
                 screen_y = 3 + (y - scroll_y)
                 if screen_y >= term_lines - 8: break
@@ -237,92 +261,108 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
                     t_id, elev, hf, vf = parse_metatile(active_tiles[i])
                     is_in_selection = selection.active and (x_min <= x <= x_max) and (y_min <= y <= y_max)
                     
+                    # Look up behavioral text character replacement string pattern
+                    tile_behavior_txt = "UNKNOWN"
+                    for b_t in all_browser_tiles:
+                        if b_t.tile_id == t_id:
+                            tile_behavior_txt = b_t.behavior_name
+                            break
+                    
+                    render_str = get_tile_representation(t_id, tile_behavior_txt)
+                    
                     if i == active_cursor:
-                        disp = input_buffer.ljust(4, '_') if input_buffer else f"{t_id:04d}"
-                        stdscr.addstr(screen_y, 2 + (x - scroll_x) * 6, f"[{disp[:2]}{disp[2:]}]", curses.color_pair(100))
+                        disp = input_buffer.ljust(4, '_') if input_buffer else render_str
+                        stdscr.addstr(screen_y, 2 + (x - scroll_x) * 6, f"▶{disp[:4]}◀", curses.color_pair(100) | curses.A_REVERSE)
                     elif is_in_selection:
-                        stdscr.addstr(screen_y, 2 + (x - scroll_x) * 6, f" {t_id:04d} ", curses.color_pair(101))
+                        stdscr.addstr(screen_y, 2 + (x - scroll_x) * 6, f"│{render_str}│", curses.color_pair(101))
                     else:
                         pal_idx = ELEVATION_COLORS[elev % len(ELEVATION_COLORS)]
                         attr_color = curses.color_pair(pal_idx)
                         if hf: attr_color |= curses.A_UNDERLINE
                         if vf: attr_color |= curses.A_STANDOUT
-                        stdscr.addstr(screen_y, 2 + (x - scroll_x) * 6, f" {t_id:04d} ", attr_color)
+                        stdscr.addstr(screen_y, 2 + (x - scroll_x) * 6, f" {render_str} ", attr_color)
                 
                 if active_width > scroll_x + max_visible_cols and (2 + max_visible_cols * 6) < term_cols:
                     stdscr.addstr(screen_y, 2 + max_visible_cols * 6, ">")
 
             target_footer_y = 3 + max_visible_rows
             if active_height > scroll_y + max_visible_rows and target_footer_y < (term_lines - 7):
-                stdscr.addstr(target_footer_y, 0, "     vvv (More rows below) vvv")
+                stdscr.addstr(target_footer_y, 0, "     vvv (More layout geometry below) vvv")
 
+            # --- DYNAMIC INVENTORY / ELEMENT INSPECTOR SIDEBAR ---
             current_behavior_name = "UNKNOWN"
-            if browser.visible and browser.filtered_list and browser.cursor < len(browser.filtered_list):
-                b_tile = browser.filtered_list[browser.cursor]
-                current_behavior_name = f"{b_tile.behavior_name} [ID: {b_tile.tile_id:04d}] [Tileset: {b_tile.tileset}]"
-            elif active_cursor < len(active_tiles):
+            c_tile, c_elev, c_h, c_v = 0, 0, 0, 0
+            if active_cursor < len(active_tiles):
                 c_tile, c_elev, c_h, c_v = parse_metatile(active_tiles[active_cursor])
                 for t in all_browser_tiles:
                     if t.tile_id == c_tile:
                         current_behavior_name = t.behavior_name
                         break
+
+            # Draw Inspector Box Structure Panel on the right side window bounds
+            sidebar_start_x = map_cols + 2
+            if sidebar_start_x < term_cols - 5 and term_lines > 12:
+                stdscr.addstr(2, sidebar_start_x, "┌── TILE INSPECTOR ──┐", curses.color_pair(7))
+                stdscr.addstr(3, sidebar_start_x, f"│ ID: {c_tile:04d}           │", curses.color_pair(7))
+                stdscr.addstr(4, sidebar_start_x, f"│ Elev: {c_elev:02d}           │", curses.color_pair(7))
+                stdscr.addstr(5, sidebar_start_x, f"│ X: {c_x:02d}  Y: {c_y:02d}        │", curses.color_pair(7))
                 
+                trunc_behavior = current_behavior_name[:12].ljust(12)
+                stdscr.addstr(6, sidebar_start_x, f"│ Type: {trunc_behavior} │", curses.color_pair(11))
+                stdscr.addstr(7, sidebar_start_x, "└────────────────────┘", curses.color_pair(7))
+
             if active_cursor < len(active_tiles):
-                c_tile, c_elev, c_h, c_v = parse_metatile(active_tiles[active_cursor])
                 flip_status = "None" if not (c_h or c_v) else ("Both" if (c_h and c_v) else ("Horiz" if c_h else "Vert"))
                 clip_status = "Empty" if clip_2d.width == 0 else f"{clip_2d.width}x{clip_2d.height} Block"
                 if term_lines - 6 >= 0:
                     mode_label = "Border" if border_mode else "Map"
-                    stdscr.addstr(term_lines - 6, 0, f"{mode_label} -> X: {c_x:02d}, Y: {c_y:02d} | Size: {active_width}x{active_height} | ID: {c_tile:04d} | Elev: {c_elev:02d} | Flips: {flip_status} | Clip: {clip_status}", curses.color_pair(3))
+                    stdscr.addstr(term_lines - 6, 0, f"{mode_label} Layout -> Size: {active_width}x{active_height} | Flips: {flip_status} | Clip Buffer: {clip_status}", curses.color_pair(3))
 
             if term_lines - 4 >= 0:
-                stdscr.addstr(term_lines - 4, 0, "Active Elevs: ")
-                curr_col = 14
+                stdscr.addstr(term_lines - 4, 0, "Map Active Elevations Found: ")
+                curr_col = 28
                 for e_idx in active_elevations:
                     if curr_col + 6 >= term_cols: break
                     c_pair = ELEVATION_COLORS[e_idx % len(ELEVATION_COLORS)]
                     stdscr.addstr(term_lines - 4, curr_col, f" [{e_idx:02d}] ", curses.color_pair(c_pair))
                     curr_col += 6
 
-            browser_start_y = 2 
-
+            # --- TILE SELECTION BROWSER SIDEBAR OVERLAY ---
+            browser_start_y = 9
             if browser.visible:
                 if browser.filtered_list:
                     if browser.cursor < browser.scroll: browser.scroll = browser.cursor
-                    elif browser.cursor >= browser.scroll + (max_visible_rows - 2): browser.scroll = browser.cursor - (max_visible_rows - 2) + 1
+                    elif browser.cursor >= browser.scroll + (max_visible_rows - 7): browser.scroll = browser.cursor - (max_visible_rows - 7) + 1
                 else:
                     browser.scroll = 0
                     browser.cursor = 0
 
-                if browser_start_y < term_lines - 8 and (map_cols + 1) < term_cols:
-                    stdscr.addstr(browser_start_y, map_cols + 1, "TILE BROWSER".ljust(side_panel_cols), curses.A_REVERSE)
+                if browser_start_y < term_lines - 8 and sidebar_start_x < term_cols:
+                    stdscr.addstr(browser_start_y, sidebar_start_x, "── TILESET BROWSER ──".ljust(side_panel_cols), curses.A_REVERSE)
                 
-                end_browser_idx = min(len(browser.filtered_list), browser.scroll + max(1, max_visible_rows - 2))
+                end_browser_idx = min(len(browser.filtered_list), browser.scroll + max(1, max_visible_rows - 7))
                 for idx in range(browser.scroll, end_browser_idx):
                     b_scr_y = browser_start_y + 1 + (idx - browser.scroll)
                     if b_scr_y >= term_lines - 8: break
                     
-                    if (map_cols + 1) < term_cols:
+                    if sidebar_start_x < term_cols:
                         tile = browser.filtered_list[idx]
-                        row_txt = f"{tile.tile_id:04d} {tile.behavior_name[:8]} [{tile.tileset[:6]}]".ljust(side_panel_cols)[:side_panel_cols]
+                        row_txt = f"{tile.tile_id:04d} {tile.behavior_name[:8]}".ljust(side_panel_cols)[:side_panel_cols]
                         
                         if idx == browser.cursor:
-                            stdscr.addstr(b_scr_y, map_cols + 1, row_txt, curses.color_pair(100))
+                            stdscr.addstr(b_scr_y, sidebar_start_x, row_txt, curses.color_pair(100))
                         else:
                             c_pair = get_row_color_pair(tile.behavior_name)
-                            stdscr.addstr(b_scr_y, map_cols + 1, row_txt, curses.color_pair(c_pair))
+                            stdscr.addstr(b_scr_y, sidebar_start_x, row_txt, curses.color_pair(c_pair))
 
             if term_lines - 2 >= 0:
                 if browser.visible:
-                    stdscr.addstr(term_lines - 2, 0, "Footer: [ENTER] Paste ID | [N] Toggle Browser | [/] Search | [Ctrl+S] Save & Close", curses.A_DIM)
+                    stdscr.addstr(term_lines - 2, 0, "Footer: [ENTER] Paste Selection ID | [N] Hide Browser | [/] Search Filter Grid | [Ctrl+S] Save", curses.A_DIM)
                 else:
-                    stdscr.addstr(term_lines - 2, 0, "Footer: [S] Area Selection Tool | [C] Copy | [V] Paste Area Matrix | [-] Sequential Fill | [Ctrl+S] Save", curses.A_DIM)
-
-            if term_lines - 5 >= 0:
-                stdscr.addstr(term_lines - 5, 0, f"Selected Tile Behavior: {current_behavior_name}".ljust(term_cols - 1), curses.color_pair(11))
+                    stdscr.addstr(term_lines - 2, 0, "Footer: [S] Multi-Block Target Area Selection | [C/V] Matrix Cache Buffer | [Ctrl+S] Save & Quit", curses.A_DIM)
 
             if search_mode and (term_lines - 3 >= 0):
-                stdscr.addstr(term_lines - 3, 0, f"SEARCH MODE: {browser.search}_", curses.color_pair(6))
+                stdscr.addstr(term_lines - 3, 0, f"FILTER SEARCH PATTERN: {browser.search}_", curses.color_pair(6))
 
             stdscr.refresh()
             ch = stdscr.getch()
@@ -372,7 +412,6 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
                 if border_mode: continue
                 new_w = prompt_user_input(stdscr, "Enter New Map Width: ", term_lines)
                 new_h = prompt_user_input(stdscr, "Enter New Map Height: ", term_lines)
-                curses.curs_set(1)
                 
                 if new_w and new_h and new_w > 0 and new_h > 0:
                     metatiles = resize_map_matrix(current_width, current_height, new_w, new_h, metatiles, border_blocks)
@@ -383,7 +422,6 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
                 continue
 
             if ch in [ord('c'), ord('C')]:
-                # Perform continuous block chunk reading 
                 w_sel = x_max - x_min + 1
                 h_sel = y_max - y_min + 1
                 clip_2d.width = w_sel
@@ -393,7 +431,7 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
                     for sx in range(x_min, x_max + 1):
                         idx_map = sy * active_width + sx
                         clip_2d.tiles.append(active_tiles[idx_map])
-                selection.active = False # Reset layout selection bounds visually
+                selection.active = False 
                 continue
                 
             elif ch in [ord('v'), ord('V')]:
@@ -413,10 +451,8 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
             elif ch == ord('-'):
                 if selection.active:
                     start_id = prompt_user_input(stdscr, "Enter Start Metatile ID: ", term_lines)
-                    curses.curs_set(1)
                     if start_id is not None:
                         elev = prompt_user_input(stdscr, "Enter Elevation: ", term_lines)
-                        curses.curs_set(1)
                         if elev is not None:
                             current_id = start_id
                             for sy in range(y_min, y_max + 1):
@@ -428,7 +464,6 @@ def curses_main(stdscr, filepath, width, metatiles, allowed_tilesets, border_blo
                 continue
 
             if ch in [ord('j'), ord('J')]:
-                # Apply modification properties across bounding box areas if selection state is active
                 for sy in range(y_min, y_max + 1):
                     for sx in range(x_min, x_max + 1):
                         idx = sy * active_width + sx
@@ -701,3 +736,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
